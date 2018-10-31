@@ -5,7 +5,7 @@
   "license": "MIT",
   "version": "0.0.1",
   "description": "Pico-8 build system",
-  "bin": "pico-8-build",
+  "bin": "bin/pico-8-build.js",
   "dependencies": {
     "luamin": "^1.0.4",
     "minimist": "^1.2.0"
