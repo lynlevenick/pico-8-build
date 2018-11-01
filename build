@@ -1,0 +1,44 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "pathname"
+
+input = ARGV[0] or raise "Provide input file as first argument"
+input = Pathname.new(input).expand_path
+
+output = ARGV[1] or raise "Provide output file as second argument"
+output = Pathname.new(output).expand_path
+
+$splice_dir = input.dirname
+$splice_seen = []
+def splice(path)
+  path = $splice_dir.join(path)
+
+  if $splice_seen.include?(path.to_s)
+    ""
+  else
+    $splice_seen << path.to_s
+
+    begin
+      old_dir = $splice_dir
+      $splice_dir = path.dirname
+
+      preprocess(path.read)
+    ensure
+      $splice_dir = old_dir
+    end
+  end
+end
+
+def preprocess(content)
+  content.gsub!(/^--#(.*)$/) do
+    eval($1)
+  end
+
+  content
+end
+
+output.dirname.mkpath
+output.write(input.read.gsub(/(?<=__lua__\n)\s*(.*?)\s*(?=(?:\n__[a-z]+__|\z))/m) {
+               preprocess($1)
+             })
