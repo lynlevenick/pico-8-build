@@ -40,5 +40,5 @@ end
 
 output.dirname.mkpath
 output.write(input.read.gsub(/(?<=__lua__\n)\s*(.*?)\s*(?=(?:\n__[a-z]+__|\z))/m) {
-               preprocess($1)
+               preprocess($1).strip
              })
