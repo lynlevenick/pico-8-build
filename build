@@ -9,30 +9,118 @@ input = Pathname.new(input).expand_path
 output = ARGV[1] or raise "Provide output file as second argument"
 output = Pathname.new(output).expand_path
 
-$splice_dir = input.dirname
+SHORTKEY_ALPHA = <<~DIST.split(/(?:\r\n|\r|\n)/).flat_map { |s| s.split "" }.uniq
+  local
+  function
+  return
+  if
+  then
+  else
+  end
+  _abcdefghijklmnopqrtsuvwxyz
+DIST
+def shortkey(n)
+  selections = []
+
+  n += 1
+  while n > 0
+    selections << SHORTKEY_ALPHA[(n - 1) % SHORTKEY_ALPHA.size]
+    n /= SHORTKEY_ALPHA.size
+  end
+
+  selections.join
+end
+
+$current_dir = input.dirname
+def with_dir(path)
+  begin
+    old_dir = $current_dir
+    $current_dir = path
+
+    yield
+  ensure
+    $current_dir = old_dir
+  end
+end
+
+$import_is_setup = false
+$import_seen = {}
+$import_shortkeys = {}
+def import(sym, path)
+  path = $current_dir.join(path)
+  code = []
+
+  unless $import_seen.key?(path.to_s)
+    $import_shortkeys[path] = shortkey($import_shortkeys.size)
+
+    with_dir(path.dirname) do
+      code << "_ii_#{$import_shortkeys[path]} = (function()#{preprocess(path.read)}\nend)()"
+    end
+  end
+
+  code << "local #{sym} = _ii_#{$import_shortkeys[path]}"
+  code.join("\n")
+end
+
+LUA_KEEP_SINGLE = /"(?:\\.|[^\\"])*"/
+LUA_KEEP_MULTI = /
+  (?<!(?<!-)--)
+  \[(?<level>=*)\[
+    (?:(?!\]\k<level>\]).*)
+  \]\k<level>\]
+/mx
+LUA_KEEP = /(?:#{LUA_KEEP_SINGLE}|#{LUA_KEEP_MULTI})/
+LUA_AROUND_KEEP = /\G(?<code>(?:(?!#{LUA_KEEP})[^\\]|\\.)*)#{LUA_KEEP}?/mx
+
 $splice_seen = []
-def splice(path)
-  path = $splice_dir.join(path)
+def splice(path, compress: false)
+  path = $current_dir.join(path)
 
   if $splice_seen.include?(path.to_s)
     ""
   else
     $splice_seen << path.to_s
+    with_dir(path.dirname) do
+      code = preprocess(path.read)
 
-    begin
-      old_dir = $splice_dir
-      $splice_dir = path.dirname
+      if compress then
+        code.gsub!(LUA_AROUND_KEEP) do |c|
+          before = $1
+          keep = c[$1.size..-1]
 
-      preprocess(path.read)
-    ensure
-      $splice_dir = old_dir
+          # Strip single-line comments
+          before.gsub!(/--(?!\[).*$/, "")
+          # Strip multi-line comments
+          before.gsub!(/(?<!-)--\[(=*)\[.*?\]\1\]/m, "")
+          # Strip space around some tokens
+          before.gsub!(/\s*([({}),=+\-*\/%^~!<>]|\.\.)\s*/, "\\1")
+          # Strip whitespace on either side
+          before.strip!
+          # Strip leading spaces
+          before.gsub!(/^[ \t]+/, "")
+          # Strip trailing spaces
+          before.gsub!(/[ \t]+$/, "")
+          # Strip repeated spaces
+          before.gsub!(/[ \t]{2,}/, " ")
+          # Normalize newlines to \n
+          before.gsub!(/(?:(?<!\n)\r(?!\n)|\r\n)/, "\n")
+          # Strip repeated newlines
+          before.gsub!(/\n{2,}/, "\n")
+          # Replace newlines with spaces if the next line doesn't start with a (
+          before.gsub!(/\n(?!\()/, " ")
+
+          before << keep
+        end
+      end
+
+      code
     end
   end
 end
 
 def preprocess(content)
   content.gsub!(/^--#(.*)$/) do
-    eval($1)
+    eval($1).strip
   end
 
   content
@@ -40,5 +128,5 @@ end
 
 output.dirname.mkpath
 output.write(input.read.gsub(/(?<=__lua__\n)\s*(.*?)\s*(?=(?:\n__[a-z]+__|\z))/m) {
-               preprocess($1).strip
+               preprocess($1)
              })
